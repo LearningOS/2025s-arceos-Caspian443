@@ -161,15 +161,59 @@ pub fn stdout() -> Stdout {
     Stdout { inner: &INSTANCE }
 }
 
+#[doc(hidden)]
 pub fn __print_impl(args: core::fmt::Arguments) {
-    if cfg!(feature = "smp") {
-        arceos_api::stdio::ax_console_write_bytes(b"\x1b[32m").unwrap();
-        arceos_api::stdio::ax_console_write_fmt(args).unwrap();
-        arceos_api::stdio::ax_console_write_bytes(b"\x1b[0m").unwrap();
-    } else {
-        let mut out = stdout().lock();
-        out.write(b"\x1b[32m").unwrap();
-        out.write_fmt(args).unwrap();
-        out.write(b"\x1b[0m").unwrap();
+    // 仅当 "alloc" feature 启用时，我们才能执行基于字符串内容的检查
+    #[cfg(feature = "alloc")]
+    {
+        // 将 fmt::Arguments 转换为 String 以检查内容
+        // 注意：这会进行一次堆内存分配
+        let formatted_string = alloc::format!("{}", args);
+
+        // 定义你想要用来触发彩色打印的特定标记字符串
+        const COLOR_TRIGGER_MARKER: &str = "[WithColor]"; // 你可以修改这个标记
+
+        // 定义颜色代码
+        const COLOR_PREFIX: &[u8] = b"\x1b[32m"; // 例如，绿色
+        const COLOR_SUFFIX: &[u8] = b"\x1b[0m";   // 重置颜色
+
+        if formatted_string.contains(COLOR_TRIGGER_MARKER) {
+            // 如果包含标记，则带颜色打印
+            if cfg!(feature = "smp") {
+                arceos_api::stdio::ax_console_write_bytes(COLOR_PREFIX).unwrap();
+                // 打印已格式化的字符串 (不是原始的 args)
+                arceos_api::stdio::ax_console_write_bytes(formatted_string.as_bytes()).unwrap();
+                arceos_api::stdio::ax_console_write_bytes(COLOR_SUFFIX).unwrap();
+            } else {
+                let mut out = stdout().lock();
+                out.write(COLOR_PREFIX).unwrap();
+                out.write(formatted_string.as_bytes()).unwrap();
+                out.write(COLOR_SUFFIX).unwrap();
+            }
+        } else {
+            // 如果不包含标记，则不带颜色打印
+            if cfg!(feature = "smp") {
+                arceos_api::stdio::ax_console_write_bytes(formatted_string.as_bytes()).unwrap();
+            } else {
+                let mut out = stdout().lock();
+                out.write(formatted_string.as_bytes()).unwrap();
+            }
+        }
+    }
+
+    // 如果 "alloc" feature 没有启用，我们无法轻易检查字符串内容。
+    // 这种情况下，我们可以回退到不进行颜色处理，或者使用你提供的总是带颜色的版本。
+    // 为了满足"检查内容"的核心要求，这里假设 "alloc" 存在。
+    // 如果要提供非 alloc 的回退，可以这样做：
+    #[cfg(not(feature = "alloc"))]
+    {
+        // 回退逻辑：例如，总是以默认颜色打印 (不检查内容)
+        // 或者，你可以让它总是以特定颜色打印，就像你之前提供的代码片段那样
+        // 这里我们选择默认无色打印作为回退
+        if cfg!(feature = "smp") {
+            arceos_api::stdio::ax_console_write_fmt(args).unwrap();
+        } else {
+            stdout().lock().write_fmt(args).unwrap();
+        }
     }
 }

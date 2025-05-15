@@ -57,6 +57,9 @@ extern crate alloc;
 #[doc(no_inline)]
 pub use alloc::{boxed, collections, format, string, vec};
 
+#[cfg(feature = "alloc")]
+pub mod new_collections;
+
 #[doc(no_inline)]
 pub use core::{arch, cell, cmp, hint, marker, mem, ops, ptr, slice, str};
 
@@ -70,6 +73,7 @@ pub mod process;
 pub mod sync;
 pub mod thread;
 pub mod time;
+
 
 #[cfg(feature = "fs")]
 pub mod fs;

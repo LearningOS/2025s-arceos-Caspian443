@@ -33,6 +33,18 @@ pub mod sys {
         /// Shutdown the whole system and all CPUs.
         pub fn ax_terminate() -> !;
     }
+
+    /// 从 axhal 获取一个 u128 类型的随机数。
+    #[inline]
+    pub fn ax_rand_u128() -> u128 {
+        axhal::misc::random()
+    }
+
+    /// 从 axhal 获取一个 u64 类型的随机数 (取 u128 的低 64 位)。
+    #[inline]
+    pub fn ax_rand_u64() -> u64 {
+        axhal::misc::random() as u64
+    }
 }
 
 /// Time-related operations.
