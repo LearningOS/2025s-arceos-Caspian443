@@ -9,6 +9,19 @@ use axtask::TaskExtRef;
 use axhal::paging::MappingFlags;
 use arceos_posix_api as api;
 
+// 内存管理相关
+use alloc::vec;
+use alloc::vec::Vec;
+use axhal::mem::{PAGE_SIZE_4K, phys_to_virt};
+use alloc::sync::Arc;
+use arceos_posix_api::imp::fd_ops::{get_file_like, FileLike};
+
+
+// 文件操作相关（根据你的项目实际情况调整）
+use axstd::fs::File; // 如果你用 axstd 文件系统
+// use crate::your_file_table::get_file_by_fd; // 如果有自定义文件表
+
+
 const SYS_IOCTL: usize = 29;
 const SYS_OPENAT: usize = 56;
 const SYS_CLOSE: usize = 57;
@@ -131,16 +144,60 @@ fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
     ret
 }
 
-#[allow(unused_variables)]
+fn load_file(file: &Arc<dyn FileLike>, buf: &mut [u8], _offset: isize) -> Result<usize, i32> {
+    file.read(buf).map_err(|_| -1)
+}
+
 fn sys_mmap(
     addr: *mut usize,
     length: usize,
     prot: i32,
     flags: i32,
     fd: i32,
-    _offset: isize,
+    offset: isize,
 ) -> isize {
-    unimplemented!("no sys_mmap!");
+    // 1. 计算映射的虚拟地址
+    let vaddr = if addr.is_null() || addr as usize == 0 {
+        alloc_user_vaddr(length)
+    } else {
+        addr as usize
+    };
+
+    // 2. 通过 fd 获取文件对象
+    let file_like = match arceos_posix_api::imp::fd_ops::get_file_like(fd) {
+        Ok(f) => f,
+        Err(_) => return -1,
+    };
+    // 3. 读取文件内容到 buf
+    let mut buf = vec![0u8; length];
+    if load_file(&file_like, &mut buf, offset).is_err() {
+        return -1;
+    }
+
+    // 4. 分页映射并拷贝数据
+    let page_count = (length + PAGE_SIZE_4K - 1) / PAGE_SIZE_4K;
+    let curr = current();
+    let mut uspace = curr.task_ext().aspace.lock();
+    for i in 0..page_count {
+        let page_vaddr = vaddr + i * PAGE_SIZE_4K;
+        uspace.map_alloc(
+            page_vaddr.into(),
+            PAGE_SIZE_4K,
+            MappingFlags::from(MmapProt::from_bits_truncate(prot)) | MappingFlags::USER,
+            true
+        ).unwrap();
+        let (paddr, _, _) = uspace.page_table().query(page_vaddr.into()).unwrap();
+        let start = i * PAGE_SIZE_4K;
+        let end = ((i + 1) * PAGE_SIZE_4K).min(length);
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                buf[start..end].as_ptr(),
+                phys_to_virt(paddr).as_mut_ptr(),
+                end - start,
+            );
+        }
+    }
+    vaddr as isize
 }
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {
@@ -173,4 +230,10 @@ fn sys_set_tid_address(tid_ptd: *const i32) -> isize {
 fn sys_ioctl(_fd: i32, _op: usize, _argp: *mut c_void) -> i32 {
     ax_println!("Ignore SYS_IOCTL");
     0
+}
+
+// 占位：你需要实现一个用户空间虚拟地址分配器
+fn alloc_user_vaddr(_length: usize) -> usize {
+    // TODO: 实现真正的分配逻辑
+    0x8000_0000 // 示例返回一个固定地址
 }
