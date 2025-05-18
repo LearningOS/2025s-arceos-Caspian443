@@ -75,6 +75,7 @@ impl RootDirectory {
         F: FnOnce(Arc<dyn VfsOps>, &str) -> AxResult<T>,
     {
         debug!("lookup at root: {}", path);
+        warn!("mount points: {:?}", self.mounts.iter().map(|mp| mp.path).collect::<Vec<&str>>());
         let path = path.trim_matches('/');
         if let Some(rest) = path.strip_prefix("./") {
             return self.lookup_mounted_fs(rest, f);
@@ -133,10 +134,12 @@ impl VfsNodeOps for RootDirectory {
     }
 
     fn rename(&self, src_path: &str, dst_path: &str) -> VfsResult {
+        warn!("rename at root: {} -> {}", src_path, dst_path);
         self.lookup_mounted_fs(src_path, |fs, rest_path| {
             if rest_path.is_empty() {
                 ax_err!(PermissionDenied) // cannot rename mount points
             } else {
+                warn!("rename at mounted fs: {} -> {}", rest_path, dst_path);
                 fs.root_dir().rename(rest_path, dst_path)
             }
         })

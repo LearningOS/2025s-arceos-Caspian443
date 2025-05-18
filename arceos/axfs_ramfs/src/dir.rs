@@ -4,6 +4,7 @@ use alloc::{string::String, vec::Vec};
 
 use axfs_vfs::{VfsDirEntry, VfsNodeAttr, VfsNodeOps, VfsNodeRef, VfsNodeType};
 use axfs_vfs::{VfsError, VfsResult};
+use log::warn;
 use spin::RwLock;
 
 use crate::file::FileNode;
@@ -65,6 +66,19 @@ impl DirNode {
             }
         }
         children.remove(name);
+        Ok(())
+    }
+
+    pub fn rename_node(&self, old_name: &str, new_name: &str) -> VfsResult {
+        let mut children = self.children.write();
+        if !children.contains_key(old_name) {
+            return Err(VfsError::NotFound);
+        }
+        if children.contains_key(new_name) {
+            return Err(VfsError::AlreadyExists);
+        }
+        let node = children.remove(old_name).unwrap();
+        children.insert(new_name.into(), node);
         Ok(())
     }
 }
@@ -165,7 +179,49 @@ impl VfsNodeOps for DirNode {
         }
     }
 
-    axfs_vfs::impl_vfs_dir_default! {}
+    fn rename(&self, old_path: &str, new_path: &str) -> VfsResult {
+        warn!("rename at ramfs: {} -> {}", old_path, new_path);
+
+        // 只处理 ramfs 内部路径，去掉前导 '/'
+        let old_path = old_path.trim_start_matches('/');
+        let new_path = new_path.trim_start_matches('/');
+        let new_path = new_path.strip_prefix("tmp/").unwrap_or(new_path);
+
+        let (old_parent_path, old_name) = split_parent_name(old_path)?;
+        let (new_parent_path, new_name) = split_parent_name(new_path)?;
+
+        let root_arc = self.this.upgrade().unwrap();
+
+        let old_parent_node = VfsNodeOps::lookup(root_arc.clone(), old_parent_path)?;
+        let old_parent = old_parent_node
+            .as_any()
+            .downcast_ref::<DirNode>()
+            .ok_or(VfsError::InvalidInput)?;
+
+        let new_parent_node = VfsNodeOps::lookup(root_arc, new_parent_path)?;
+        let new_parent = new_parent_node
+            .as_any()
+            .downcast_ref::<DirNode>()
+            .ok_or(VfsError::InvalidInput)?;
+
+        if Arc::ptr_eq(&old_parent.this.upgrade().unwrap(), &new_parent.this.upgrade().unwrap()) {
+            old_parent.rename_node(old_name, new_name)
+        } else {
+            let mut old_children = old_parent.children.write();
+            let node = old_children.remove(old_name).ok_or(VfsError::NotFound)?;
+            let mut new_children = new_parent.children.write();
+            if new_children.contains_key(new_name) {
+                old_children.insert(old_name.into(), node);
+                return Err(VfsError::AlreadyExists);
+            }
+            new_children.insert(new_name.into(), node);
+            Ok(())
+        }
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }
 
 fn split_path(path: &str) -> (&str, Option<&str>) {
@@ -173,4 +229,15 @@ fn split_path(path: &str) -> (&str, Option<&str>) {
     trimmed_path.find('/').map_or((trimmed_path, None), |n| {
         (&trimmed_path[..n], Some(&trimmed_path[n + 1..]))
     })
+}
+
+fn split_parent_name(path: &str) -> Result<(&str, &str), VfsError> {
+    let path = path.trim_start_matches('/');
+    if let Some(pos) = path.rfind('/') {
+        let (parent, name) = path.split_at(pos);
+        let name = &name[1..];
+        Ok((if parent.is_empty() { "/" } else { parent }, name))
+    } else {
+        Ok((".", path))
+    }
 }

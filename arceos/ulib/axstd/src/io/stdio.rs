@@ -183,7 +183,7 @@ pub fn __print_impl(args: core::fmt::Arguments) {
 
 
     if use_color {
-        if cfg!(feature = "smp") {
+    if cfg!(feature = "smp") {
             arceos_api::stdio::ax_console_write_bytes(COLOR_PREFIX).unwrap();
             arceos_api::stdio::ax_console_write_fmt(args).unwrap(); // 仍然用原始 args 打印
             arceos_api::stdio::ax_console_write_bytes(COLOR_SUFFIX).unwrap();
@@ -196,9 +196,9 @@ pub fn __print_impl(args: core::fmt::Arguments) {
     } else {
         // 不带颜色打印
         if cfg!(feature = "smp") {
-            arceos_api::stdio::ax_console_write_fmt(args).unwrap();
-        } else {
-            stdout().lock().write_fmt(args).unwrap();
+        arceos_api::stdio::ax_console_write_fmt(args).unwrap();
+    } else {
+        stdout().lock().write_fmt(args).unwrap();
         }
     }
 }
